@@ -1,0 +1,86 @@
+{% extends 'home.html' %}
+{% load staticfiles %}
+{% load l10n %}
+{% load iom_filters %}
+{% block title %}NZG Meet - {{object}} {% endblock %}
+{% block createdone %}
+	var qry = "SELECT * FROM waarnemingen WHERE waarnemer = '{{object}}'";
+	var sql = new cartodb.SQL({ user: 'tkleinen' });
+    sql.getBounds(qry).done(function(bounds) {
+   		theMap.fitBounds(bounds);
+   	});
+{% endblock createdone %}
+{% block extrastyle %}
+{{ block.super }}
+<style>
+.foto {
+  height: 56px;
+  float: left;
+  /*image-orientation: from-image;*/
+}
+.foto:hover {
+  position: absolute;
+  right: 0px;
+  overflow: visible;
+  height: 240px;
+  z-index: 999;
+}
+.col {
+  margin: 0px;
+  padding-right: 0px;
+}
+
+.left {
+  float: left;
+  padding: 2px;
+}
+</style>
+<script>
+var marker = null;
+var markerVisible = false;
+function showMarker(latlng) {
+	if (marker==null) {
+		marker = new L.circleMarker(latlng,{radius:20,color:"green"});
+		marker.addTo(theMap);
+	}
+	else {
+		marker.setLatLng(latlng);
+		if (!markerVisible) {
+			theMap.addLayer(marker);
+		}
+	}
+	markerVisible = true;
+}
+function hideMarker() {
+	if(markerVisible) {
+		theMap.removeLayer(marker);
+		markerVisible = false;
+	}
+}
+</script>
+{% endblock extrastyle %}
+{% block list %}
+<div id="list" class = "list-group scroll">
+<a href="#" class="list-group-item active" title="Waarnemer"><img class="persona" src="{% static "img/user.png" %}"></img>{{object}}<span title="Aantal waarnemingen" class="badge">{{object.aantal_waarnemingen}}</a>
+{% for m in meetpunten %}
+<div class="row">
+	<div class="col col-md-9">
+		<a href="{% url 'meetpunt-detail' m.id %}" class="list-group-item" onmouseover="showMarker({{m.latlng}});" onmouseout="hideMarker();">{{m.name}}
+		<span class = "badge" title='Aantal waarnemingen'>{{m.aantal_waarnemingen|defaultif0:""}}</span>
+		<br/><div class='text-muted'><small>{{m.description|default:"&nbsp;"}}</small></div></a>
+	</div>
+	<div class="col left col-md-3">
+		{% if m.photo_url %}
+			<a href="{{m.photo_url}}"><img class="foto" src="{{m.photo_url}}"></img></a>
+		{% endif %}
+	</div> 
+</div>
+{% empty %}
+<div class="row">
+<div class="col-md-12">
+<div class="bg-info text-center"<i>(Geen meetpunten gevonden)</i></div>
+</div>
+</div>
+{% endfor %}
+</div>
+{% endblock list %}
