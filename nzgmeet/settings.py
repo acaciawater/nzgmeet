@@ -44,7 +44,7 @@ INSTALLED_APPS = (
     'django.contrib.gis',
     'bootstrap3',
     'nzgmeet',
-    'iom',
+    'nzgmeet.apps.IomConfig', # iom app named 'NZG Meet'
     'acacia',
     'acacia.data',
     'acacia.data.events',
