@@ -23,9 +23,6 @@ SITE_ID = 1
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.8/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'n871!+1wn@zn+55oe_4^w_xi2ulsw#p1_8nmg_kq-)rty99#-c'
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -132,7 +129,7 @@ LOGGING = {
         'file': {
             'level': 'DEBUG',
             'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOGGING_ROOT, 'texel.log'),
+            'filename': os.path.join(LOGGING_ROOT, 'nzgmeet.log'),
             'when': 'D',
             'interval': 1, # every day a new file
             'backupCount': 0,
