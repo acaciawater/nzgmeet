@@ -63,3 +63,5 @@ target/
 /logs/
 /media/
 /static/
+.settings/
+
