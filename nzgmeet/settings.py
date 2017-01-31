@@ -48,7 +48,6 @@ INSTALLED_APPS = (
     'acacia.data',
     'acacia.data.events',
     'registration',
-    'djcelery',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -119,9 +118,6 @@ LOGIN_REDIRECT_URL = '/'
 REGISTRATION_AUTO_LOGIN = True
 
 AUTH_PROFILE_MODULE = 'iom.UserProfile'
-
-CELERY_RESULT_BACKEND = 'amqp'
-CELERY_TASK_RESULT_EXPIRES = 18000  # 5 hours.
 
 # Logging
 LOGGING = {
