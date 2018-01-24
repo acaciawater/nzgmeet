@@ -133,6 +133,10 @@ LOGGING = {
             'backupCount': 0,
             'formatter': 'default'
         },
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+        },
         'django': {
             'level': 'DEBUG',
             'class': 'logging.handlers.TimedRotatingFileHandler',
@@ -158,8 +162,13 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': True,
         },
+        'iom.management': {
+            'handlers': ['console',],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
         'nzgmeet': {
-            'handlers': ['file',],
+            'handlers': ['file','console'],
             'level': 'DEBUG',
             'propagate': True,
         },
