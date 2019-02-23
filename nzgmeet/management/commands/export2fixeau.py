@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-import os, pytz, datetime
 import string
 
 from django.conf import settings
@@ -228,8 +227,8 @@ class Command(BaseCommand):
         location = meetpunt.latlng()
         device = meetpunt.device
         measurements = [{
-            "time": p.date.isoformat(),
-            "value": p.value/1000.0,
+            'time': p.date.isoformat(),
+            'value': p.value/1000.0,
             'location': {
                 'coordinates': [
                     location[1],
@@ -237,48 +236,14 @@ class Command(BaseCommand):
                 ],
                 'type': 'Point'
             },
-#             "meta": null,
-            "source": device,
-            "parameter": 'EC',
-            "unit": 'mS/cm',
-            "series": target} for p in source.datapoints.order_by('date')]
+#             'meta': null,
+            'source': device,
+            'parameter': 'EC',
+            'unit': 'mS/cm',
+            'series': target} for p in source.datapoints.order_by('date')]
         response = self.api.post('/measurement/',measurements)
         response.raise_for_status()
         return response.json()
-    
-    def addMeasurements1(self, meetpunt):
-        ''' add all measurements for meetpunt to time series '''
-        location = meetpunt.latlng()
-        waarnemingen = meetpunt.waarneming_set.all()
-        
-        for category in ('Deep', 'Shallow'):
-            cat = 'Diep' if category == 'Deep' else 'Ondiep'
-            sources = meetpunt.series_set.filter(name__icontains=cat)
-            if not sources:
-                logger.warning('Time series EC_{} for meetpunt {} does not exist.'.format(cat,meetpunt.name))
-                continue
-            source = next(sources)
-            target = self.findSeries(meetpunt, category)
-            if not target:
-                logger.error('Time series {} for EC ({}) does not exist.'.format(meetpunt.name,category))
-                continue
-
-            # bulk create measurements
-            measurements = [{
-                "time": p.datum,
-                "value": p.waarde/1000.0,
-                'location': {
-                    'coordinates': [
-                        location[1],
-                        location[0]
-                    ],
-                    'type': 'Point'
-                },
-                "meta": null,
-                "source": meetpunt.device,
-                "parameter": 'EC',
-                "unit": 'mS/cm',
-                "series": target['id']} for p in source.datapoints.order_by('date')]
             
     def handle(self, *args, **options):
 
@@ -372,20 +337,3 @@ class Command(BaseCommand):
                 response = error.response
                 print('ERROR creating time series {} ({}): {}'.format(m,category,response.json()))
                 break # abort
-        
-#         # update data sources  (set folder id = 6)
-#         logger.info('Updating data sources')
-#         sources = self.findObjects('/source/', {'source_type':'AkvoMobile'})
-#         for s in sources:
-#             response = self.api.patch('/source/', s['id'], {"folder":6})
-#             response.raise_for_status()
-
-#         # update series (set folder id = 6)
-#         logger.info('Updating series')
-#         for m in Meetpunt.objects.all():
-#             ser = self.findSeries(m)
-#             if ser:
-#                 logger.debug('Update series {}'.format(ser.name))
-#                 ser['folder'] = 6
-#                 response = self.api.patch('/series/', ser['id'], {"folder":6})
-#                 response.raise_for_status()
