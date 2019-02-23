@@ -167,6 +167,11 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': True,
         },
+        'nzgmeet.management': {
+            'handlers': ['console',],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
         'nzgmeet': {
             'handlers': ['file','console'],
             'level': 'DEBUG',
