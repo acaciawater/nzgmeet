@@ -228,7 +228,8 @@ class Command(BaseCommand):
         device = meetpunt.device
         measurements = [{
             'time': p.date.isoformat(),
-            'value': p.value/1000.0,
+            # assume units is μS/cm when EC > 50
+            'value': p.value/1000.0 if p.value > 50 else p.value,
             'location': {
                 'coordinates': [
                     location[1],
