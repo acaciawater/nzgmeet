@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import json
 import logging
 import string
@@ -10,6 +11,7 @@ from requests.exceptions import HTTPError
 
 from acacia.data.models import Project
 from iom.models import Waarnemer, Meetpunt, Waarneming
+from django.contrib.sites.models import Site
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,9 @@ class Api:
         self.url = url
         self.headers = {}
         
-    def post(self, path, data):
+    def post(self, path, data, **kwargs):
         url = self.url + path
-        return requests.post(url, json=data, headers=self.headers)
+        return requests.post(url, json=data, headers=self.headers, **kwargs)
 
     def put(self, path, id, data):
         url = self.url + path + str(id) +'/'
@@ -164,6 +166,21 @@ class Command(BaseCommand):
         response.raise_for_status()
         return response.json()
 
+    def addPhoto(self, photo):
+        ''' copy image from server to fixeau.com '''
+        filename = os.path.basename(photo)
+        headers = {}
+        with open(photo,'rb') as f:
+            url = self.api.url
+            headers.update(self.api.headers)
+            # remove content-type from header (content is not json)
+            headers.pop('Content-Type')
+            payload = {'name': filename}
+            files = {'image':(filename, f)}
+            response = requests.post(url+'/photo/', data = payload, headers = headers, files = files)
+            response.raise_for_status()
+            return response.json()
+    
     def getSource(self, sourceId):
         ''' return datasource object with sourceid '''
         return self.getObject('/source/', sourceId)
@@ -197,11 +214,15 @@ class Command(BaseCommand):
             'category': category
             })
 
-    def createSeries(self, meetpunt, category, folder = None):
+    def createSeries(self, meetpunt, category, folder = None, photo = None):
         ''' create timeseries for a meetpunt, category combination '''
         location = meetpunt.latlng()
         # need to make series name unique, filter on category does not work
-        name = '{} ({})'.format(meetpunt.name, category) if category else meetpunt.name 
+        name = '{} ({})'.format(meetpunt.name, category) if category else meetpunt.name
+        meta = {'identifier': meetpunt.identifier}
+        if photo:
+            meta['imageUrl'] = photo['image']
+            meta['image_id'] = photo['id']
         response = self.api.post('/series/', {
             'name': name,
             'description': meetpunt.displayname,
@@ -212,7 +233,7 @@ class Command(BaseCommand):
                 ],
                 'type': 'Point'
             },
-            'meta': {'identifier': meetpunt.identifier},
+            'meta': meta,
             'folder': folder,
             'source': meetpunt.device,
             'parameter': 'EC',
@@ -246,12 +267,50 @@ class Command(BaseCommand):
         response.raise_for_status()
         return response.json()
             
+    def addWaarnemingen(self, meetpunt, queryset, target):
+        ''' add all measurements for meetpunt from waarneming queryset and set series id to target '''
+        location = meetpunt.latlng()
+        device = meetpunt.device
+
+        def waarneming2measurement(waarneming, target):
+            meta = {}
+            if waarneming.foto_url:
+                try:
+                    photo = self.addPhoto(settings.BASE_DIR + waarneming.foto_url)
+                    logger.debug('Added photo {}: {}'.format(photo['id'],photo['name']))
+                    meta['imageUrl'] = photo['image']
+                    meta['image_id'] = photo['id']
+                except:
+                    pass
+            return {
+                'time': waarneming.datum.isoformat(),
+                # assume units is μS/cm when EC > 50
+                'value': waarneming.waarde/1000.0 if waarneming.waarde > 50 else waarneming.waarde,
+                'location': {
+                    'coordinates': [
+                        location[1],
+                        location[0]
+                    ],
+                    'type': 'Point'
+                },
+                'meta': meta,
+                'source': device,
+                'parameter': 'EC',
+                'unit': 'mS/cm',
+                'series': target} 
+            
+        measurements = [waarneming2measurement(waarneming,target) for waarneming in queryset.order_by('datum')]
+        response = self.api.post('/measurement/',measurements)
+        response.raise_for_status()
+        return response.json()
+
     def handle(self, *args, **options):
 
         url = options.get('url')
         folder = options.get('folder')        
         project = Project.objects.first()
-
+        site = Site.objects.get_current()
+        
         self.api = Api(url)
         logger.info('Logging in, url={}'.format(url))
         self.api.login(settings.FIXEAU_USERNAME,settings.FIXEAU_PASSWORD)
@@ -263,72 +322,80 @@ class Command(BaseCommand):
             logger.info('Creating group {}'.format(groupName))
             group = self.createGroup(groupName)
         groupId = group['id']
-            
-        # get or create users
-        logger.info('Creating users')
-        users = {}
-        for w in Waarnemer.objects.all():
-            try:
-                user = self.findUser(w)
-                if user:
-                    password = ''
-                    logger.debug('Found user {} with username {} for {}'.format(user['id'], user['username'], w))
-                else:
-                    user = self.createUser(w,groupId)
-                    logger.info('Created user {} with username {} and password {} for {}'.format(user['id'], user['username'], password, w))
-                users[w] = user
-                        
-            except HTTPError as error:
-                response = error.response
-                print('ERROR creating user {}: {}'.format(w,response.json()))
-                
-        # build dictionary of devices with set of waarnemers that have used the device
-        logger.info('Querying unique devices in '+project.name)
-        devices = {}    
-        for w in Waarneming.objects.all():
-            if w.device in devices:
-                devices[w.device].add(w.waarnemer)
-            else:
-                devices[w.device] = set([w.waarnemer])
-        logger.debug('{} devices found'.format(len(devices)))
-    
-        # add devices (create data sources)
-        logger.info('Creating data sources')
-        for device, waarnemers in devices.items():
-            usernames = [users[w]['username'] for w in waarnemers if w in users] 
-            try:
-                source = self.getSource(device)
-                if source:
-                    logger.debug('Found existing data source {}'.format(device))
-                else:
-                    source = self.createSource(device, usernames, groupId, folder=folder)
-                    logger.debug('Created data source {}'.format(device))
-            except HTTPError as error:
-                response = error.response
-                print('ERROR creating data source {}: {}'.format(device,response.json()))
-                break
+             
+#         # get or create users
+#         logger.info('Creating users')
+#         users = {}
+#         for w in Waarnemer.objects.all():
+#             try:
+#                 user = self.findUser(w)
+#                 if user:
+#                     password = ''
+#                     logger.debug('Found user {} with username {} for {}'.format(user['id'], user['username'], w))
+#                 else:
+#                     user = self.createUser(w,groupId)
+#                     logger.info('Created user {} with username {} and password {} for {}'.format(user['id'], user['username'], password, w))
+#                 users[w] = user
+#                          
+#             except HTTPError as error:
+#                 response = error.response
+#                 print('ERROR creating user {}: {}'.format(w,response.json()))
+#                  
+#         # build dictionary of devices with set of waarnemers that have used the device
+#         logger.info('Querying unique devices in '+project.name)
+#         devices = {}    
+#         for w in Waarneming.objects.all():
+#             if w.device in devices:
+#                 devices[w.device].add(w.waarnemer)
+#             else:
+#                 devices[w.device] = set([w.waarnemer])
+#         logger.debug('{} devices found'.format(len(devices)))
+#      
+#         # add devices (create data sources)
+#         logger.info('Creating data sources')
+#         for device, waarnemers in devices.items():
+#             usernames = [users[w]['username'] for w in waarnemers if w in users] 
+#             try:
+#                 source = self.getSource(device)
+#                 if source:
+#                     logger.debug('Found existing data source {}'.format(device))
+#                 else:
+#                     source = self.createSource(device, usernames, groupId, folder=folder)
+#                     logger.debug('Created data source {}'.format(device))
+#             except HTTPError as error:
+#                 response = error.response
+#                 print('ERROR creating data source {}: {}'.format(device,response.json()))
+#                 break
    
         logger.info('Creating time series')
         for m in Meetpunt.objects.all():
             try:
-                for source in m.series_set.filter(name__icontains='EC'):
-                    name = source.name.lower()
-                    if 'ondiep' in name:
-                        category = 'Shallow'
-                    elif 'diep' in name:
-                        category = 'Deep'
-                    else:
-                        category = None
+                if m.photo_url:
+                    try:
+                        photo = self.addPhoto(settings.BASE_DIR + m.photo_url)
+                        logger.debug('Added photo {}: {}'.format(photo['id'],photo['name']))
+                    except:
+                        photo = None
+                else:
+                    photo = None
+                cats = {
+                    'Shallow': m.waarneming_set.filter(naam__iexact="ec_ondiep"),
+                    'Deep': m.waarneming_set.filter(naam__iexact="ec_diep"),
+                    '': m.waarneming_set.filter(naam__iexact="ec")
+                }
+                for category, queryset in cats.items():
+                    if not queryset:
+                        continue
                     target = self.findSeries(m, category)
                     if target:
                         msg = 'Found existing time series {} for {}'.format(target['id'], m)
                     else:
-                        target = self.createSeries(m, category, folder=folder)
+                        target = self.createSeries(m, category, folder=folder, photo=photo)
                         msg = 'Created time series {} for {}'.format(target['id'], m)
                     if category:
                         msg += ' ({})'.format(category)
                     logger.debug(msg)
-                    response = self.addMeasurements(m, source, target['id'])
+                    response = self.addWaarnemingen(m, queryset, target['id'])
                     if response:
                         # response is unicode, not dict??
                         resp = json.loads(response)
@@ -338,3 +405,38 @@ class Command(BaseCommand):
                 response = error.response
                 print('ERROR creating time series {} ({}): {}'.format(m,category,response.json()))
                 break # abort
+            
+#         for m in Meetpunt.objects.all():
+#             try:
+#                 if m.photo_url:
+#                     photo = self.addPhoto(settings.BASE_DIR + m.photo_url)
+#                     logger.debug('Added photo {}: {}'.format(photo['id'],photo['name']))
+#                 else:
+#                     photo = None
+#                 for source in m.series_set.filter(name__icontains='EC'):
+#                     name = source.name.lower()
+#                     if 'ondiep' in name:
+#                         category = 'Shallow'
+#                     elif 'diep' in name:
+#                         category = 'Deep'
+#                     else:
+#                         category = None
+#                     target = self.findSeries(m, category)
+#                     if target:
+#                         msg = 'Found existing time series {} for {}'.format(target['id'], m)
+#                     else:
+#                         target = self.createSeries(m, category, folder=folder, photo=photo)
+#                         msg = 'Created time series {} for {}'.format(target['id'], m)
+#                     if category:
+#                         msg += ' ({})'.format(category)
+#                     logger.debug(msg)
+#                     response = self.addMeasurements(m, source, target['id'])
+#                     if response:
+#                         # response is unicode, not dict??
+#                         resp = json.loads(response)
+#                         logger.debug('Added {} measurements'.format(resp.get('count')))
+#                         
+#             except HTTPError as error:
+#                 response = error.response
+#                 print('ERROR creating time series {} ({}): {}'.format(m,category,response.json()))
+#                 break # abort
